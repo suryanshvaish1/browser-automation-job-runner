@@ -1,7 +1,7 @@
 from playwright.sync_api import sync_playwright
 from sqlalchemy.orm import Session
 from uuid import UUID
-import asyncio
+import os
 
 from .database import SessionLocal
 from .models import Job
@@ -11,6 +11,7 @@ from .websocket_manager import manager
 def emit(job_id, event, message):
 
     print(f"{event} -> {message}")
+
 
 def run_job(job_id: UUID):
 
@@ -45,7 +46,15 @@ def run_job(job_id: UUID):
                 f"Opening {job.url}"
             )
 
-            page.goto(job.url)
+            # Open website
+            page.goto(
+                job.url,
+                timeout=60000
+            )
+
+            page.wait_for_load_state(
+                "networkidle"
+            )
 
             emit(
                 job_id,
@@ -53,7 +62,8 @@ def run_job(job_id: UUID):
                 "Page loaded successfully"
             )
 
-            page.mouse.wheel(0, 1200)
+            # Scroll page
+            page.mouse.wheel(0, 1500)
 
             emit(
                 job_id,
@@ -61,45 +71,77 @@ def run_job(job_id: UUID):
                 "Scrolled page"
             )
 
-            page.hover(".product_pod")
+            # Optional GitHub search automation
+            if "github.com" in job.url.lower():
 
-            emit(
-                job_id,
-                "action.taken",
-                "Hovered over first product"
-            )
+                try:
 
-            books = page.query_selector_all(
-                ".product_pod"
-            )
+                    search_box = page.locator(
+                        'input[placeholder="Search or jump to..."]'
+                    )
 
-            data = []
+                    search_box.click()
 
-            for book in books[:5]:
+                    search_box.fill(
+                        "playwright"
+                    )
 
-                title = book.query_selector(
-                    "h3 a"
-                ).get_attribute("title")
+                    page.keyboard.press("Enter")
 
-                price = book.query_selector(
-                    ".price_color"
-                ).inner_text()
+                    emit(
+                        job_id,
+                        "action.taken",
+                        "Searched for Playwright on GitHub"
+                    )
 
-                data.append({
-                    "title": title,
-                    "price": price
-                })
+                except Exception as e:
 
-            emit(
-                job_id,
-                "data.extracted",
-                "Extracted product titles and prices"
+                    emit(
+                        job_id,
+                        "warning",
+                        f"GitHub search skipped: {str(e)}"
+                    )
+
+            # Optional Wikipedia automation
+            elif "wikipedia.org" in job.url.lower():
+
+                try:
+
+                    search_box = page.locator(
+                        'input[name="search"]'
+                    )
+
+                    search_box.fill(
+                        "Artificial Intelligence"
+                    )
+
+                    page.keyboard.press("Enter")
+
+                    emit(
+                        job_id,
+                        "action.taken",
+                        "Searched Artificial Intelligence on Wikipedia"
+                    )
+
+                except Exception as e:
+
+                    emit(
+                        job_id,
+                        "warning",
+                        f"Wikipedia search skipped: {str(e)}"
+                    )
+
+            # Create screenshots folder
+            os.makedirs(
+                "screenshots",
+                exist_ok=True
             )
 
             screenshot_path = (
                 f"screenshots/{job_id}.png"
             )
 
+            # Capture screenshot
             page.screenshot(
                 path=screenshot_path,
                 full_page=True
@@ -108,7 +150,7 @@ def run_job(job_id: UUID):
             emit(
                 job_id,
                 "screenshot.captured",
-                "Screenshot saved"
+                f"Screenshot saved at {screenshot_path}"
             )
 
             browser.close()
@@ -119,8 +161,13 @@ def run_job(job_id: UUID):
                 "Browser closed successfully"
             )
 
+        # Final result
         job.status = "completed"
-        job.result = data
+
+        job.result = {
+            "message": "Automation completed successfully",
+            "screenshot": screenshot_path
+        }
 
         db.commit()
 
